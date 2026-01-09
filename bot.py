@@ -23,7 +23,7 @@ ENABLE_MIN_AGE_CHECK = True
 # ===================== INTENTS =====================
 
 intents = discord.Intents.default()
-intents.members = True
+intents.members = True  # NODIG VOOR JOIN/LEAVE EVENTS
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -53,7 +53,10 @@ class VerifyView(discord.ui.View):
         log_channel = bot.get_channel(VERIFY_LOG_CHANNEL_ID)
 
         if not role:
-            await interaction.response.send_message("❌ Verificatie mislukt: rol niet gevonden.", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ Verificatie mislukt: rol niet gevonden.",
+                ephemeral=True
+            )
             return
 
         # Minimum account leeftijd check
@@ -67,11 +70,17 @@ class VerifyView(discord.ui.View):
             return
 
         if role in interaction.user.roles:
-            await interaction.response.send_message("ℹ️ Je bent al geverifieerd.", ephemeral=True)
+            await interaction.response.send_message(
+                "ℹ️ Je bent al geverifieerd.",
+                ephemeral=True
+            )
             return
 
         await interaction.user.add_roles(role)
-        await interaction.response.send_message("✅ **Verificatie voltooid!** Je hebt nu toegang.", ephemeral=True)
+        await interaction.response.send_message(
+            "✅ **Verificatie voltooid!** Je hebt nu toegang.",
+            ephemeral=True
+        )
 
         # ------------------- SECURITY LOG -------------------
         embed = discord.Embed(
@@ -93,7 +102,7 @@ class VerifyView(discord.ui.View):
 @bot.event
 async def on_ready():
     await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-    bot.add_view(VerifyView())
+    bot.add_view(VerifyView())  # Persistent view voor verify knop
     print(f"🟢 Bot online als {bot.user}")
 
     monitoring = bot.get_channel(MONITORING_CHANNEL_ID)
@@ -102,19 +111,19 @@ async def on_ready():
 
 @bot.event
 async def on_member_join(member):
-    channel = member.guild.get_channel(JOIN_LOG_CHANNEL_ID)
+    channel = bot.get_channel(JOIN_LOG_CHANNEL_ID)
     if channel:
         await channel.send(f"🟢 **{member}** is gejoined")
 
 @bot.event
 async def on_member_remove(member):
-    channel = member.guild.get_channel(LEAVE_LOG_CHANNEL_ID)
+    channel = bot.get_channel(LEAVE_LOG_CHANNEL_ID)
     if channel:
         await channel.send(f"🔴 **{member}** heeft de server verlaten")
 
 @bot.event
 async def on_guild_channel_delete(channel):
-    log_channel = channel.guild.get_channel(ANTI_NUKE_CHANNEL_ID)
+    log_channel = bot.get_channel(ANTI_NUKE_CHANNEL_ID)
     if log_channel:
         await log_channel.send(f"⚠️ Kanaal verwijderd: **{channel.name}**")
 
