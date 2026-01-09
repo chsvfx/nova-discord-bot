@@ -48,7 +48,11 @@ class VerifyView(discord.ui.View):
         if logs:
             await logs.send(f"✅ {interaction.user} kreeg rol Inwoner")
 
-@bot.tree.command(name="verifysetup")
+GUILD_ID = 1437438257972379870  # <-- jouw server ID 
+
+@bot.tree.command(name="verifysetup", description="Plaats het verificatiebericht")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+
 @app_commands.checks.has_permissions(administrator=True)
 async def verifysetup(interaction: discord.Interaction):
     embed = discord.Embed(
