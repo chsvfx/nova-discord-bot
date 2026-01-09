@@ -6,19 +6,14 @@ import os
 
 # ===================== CONFIG =====================
 
-GUILD_ID = 1437438257972379870  # <-- JOUW SERVER ID
+GUILD_ID = 1437438257972379870
 VERIFY_ROLE_NAME = "Inwoner"
 
-# 🔽 ECHTE CHANNEL ID'S
 MONITORING_CHANNEL_ID = 1445758222408614049
 VERIFY_LOG_CHANNEL_ID = 1445605544017531072
 ANTI_NUKE_CHANNEL_ID = 1445772067877294211
 JOIN_LOG_CHANNEL_ID = 1445606304138792980
 LEAVE_LOG_CHANNEL_ID = 1445606375102349312
-
-# Optioneel: minimum account leeftijd (dagen)
-MIN_ACCOUNT_AGE_DAYS = 7
-ENABLE_MIN_AGE_CHECK = True
 
 # ===================== INTENTS =====================
 
@@ -31,17 +26,8 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # ===================== VERIFY VIEW =====================
 
 class VerifyView(discord.ui.View):
-    def __init__(self, use_website=False, website_url=None):
+    def __init__(self):
         super().__init__(timeout=None)
-        self.use_website = use_website
-        self.website_url = website_url
-
-        if self.use_website and self.website_url:
-            self.add_item(discord.ui.Button(
-                label="Klik hier om te verifiëren via website",
-                url=self.website_url,
-                style=discord.ButtonStyle.link
-            ))
 
     @discord.ui.button(
         label="Klik Hier Om je Rollen te ontvangen",
@@ -54,41 +40,19 @@ class VerifyView(discord.ui.View):
         log_channel = interaction.guild.get_channel(VERIFY_LOG_CHANNEL_ID)
 
         if not role:
-            await interaction.response.send_message(
-                "❌ Verificatie mislukt: rol niet gevonden.",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Rol niet gevonden.", ephemeral=True)
             return
 
-        # Minimum account leeftijd check
-        if ENABLE_MIN_AGE_CHECK:
-            now = datetime.now(timezone.utc)
-            account_age_days = (now - interaction.user.created_at).days
-            if account_age_days < MIN_ACCOUNT_AGE_DAYS:
-                await interaction.response.send_message(
-                    f"⚠️ Je account is te jong ({account_age_days} dagen). "
-                    "Je kunt nog niet verifiëren.",
-                    ephemeral=True
-                )
-                return
-        else:
-            now = datetime.now(timezone.utc)
-            account_age_days = (now - interaction.user.created_at).days
-
         if role in interaction.user.roles:
-            await interaction.response.send_message(
-                "ℹ️ Je bent al geverifieerd.",
-                ephemeral=True
-            )
+            await interaction.response.send_message("ℹ️ Je bent al geverifieerd.", ephemeral=True)
             return
 
         await interaction.user.add_roles(role)
-        await interaction.response.send_message(
-            "✅ **Verificatie voltooid!** Je hebt nu toegang.",
-            ephemeral=True
-        )
+        await interaction.response.send_message("✅ Je bent nu geverifieerd!", ephemeral=True)
 
-        # ------------------- SECURITY LOG -------------------
+        now = datetime.now(timezone.utc)
+        account_age = (now - interaction.user.created_at).days
+
         embed = discord.Embed(
             title="✅ Verificatie Voltooid",
             color=discord.Color.green(),
@@ -103,13 +67,7 @@ class VerifyView(discord.ui.View):
 
         embed.add_field(
             name="📅 Account Leeftijd",
-            value=f"{account_age_days} dagen",
-            inline=False
-        )
-
-        embed.add_field(
-            name="🏷️ Rol Toegekend",
-            value=VERIFY_ROLE_NAME,
+            value=f"{account_age} dagen",
             inline=False
         )
 
@@ -130,12 +88,11 @@ class VerifyView(discord.ui.View):
 async def on_ready():
     await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
     bot.add_view(VerifyView())
-
     print(f"🟢 Bot online als {bot.user}")
 
     monitoring = bot.get_channel(MONITORING_CHANNEL_ID)
     if monitoring:
-        await monitoring.send("🟢 Nova District is succesvol opgestart")
+        await monitoring.send("🟢 Bot is succesvol opgestart")
 
 @bot.event
 async def on_member_join(member):
@@ -153,11 +110,9 @@ async def on_member_remove(member):
 async def on_guild_channel_delete(channel):
     log_channel = channel.guild.get_channel(ANTI_NUKE_CHANNEL_ID)
     if log_channel:
-        await log_channel.send(
-            f"⚠️ Kanaal verwijderd: **{channel.name}**"
-        )
+        await log_channel.send(f"⚠️ Kanaal verwijderd: **{channel.name}**")
 
-# ===================== SLASH COMMAND =====================
+# ===================== SLASH COMMANDS =====================
 
 @bot.tree.command(
     name="verifysetup",
@@ -167,33 +122,109 @@ async def on_guild_channel_delete(channel):
 @app_commands.checks.has_permissions(administrator=True)
 async def verifysetup(interaction: discord.Interaction):
 
-    # Optioneel: voeg externe website link toe als verify
-    website_verify_url = "https://JOUW-WEBSITE-URL"  # vul dit in of laat None
-    view = VerifyView(use_website=True, website_url=website_verify_url)
-
     embed = discord.Embed(
         title="📋 Server Regels & Verificatie",
         description=(
             "**Welkom bij Nova District! 🎮**\n\n"
             "📜 **Serverregels:**\n"
             "1️⃣ Respecteer alle leden en staff\n"
-            "2️⃣ Geen spam, reclame of zelfpromotie\n"
-            "3️⃣ Geen NSFW content\n"
-            "4️⃣ Geen discriminatie of haatdragende taal\n"
+            "2️⃣ Geen spam of reclame\n"
+            "3️⃣ Geen NSFW\n"
+            "4️⃣ Geen discriminatie\n"
             "5️⃣ Luister naar staff\n"
-            "6️⃣ Geen alts of ban evasion\n"
-            "7️⃣ Houd discussies in de juiste kanalen\n\n"
-            "🔐 **Klik op de knop hieronder om je rollen te ontvangen.**\n"
-            "Door te verifiëren ga je akkoord met onze regels."
+            "6️⃣ Geen alts / ban evasion\n"
+            "7️⃣ Juiste kanalen gebruiken\n\n"
+            "🔐 **Klik op de knop hieronder om je rollen te ontvangen.**"
         ),
         color=discord.Color.green()
     )
 
-    await interaction.channel.send(embed=embed, view=view)
-    await interaction.response.send_message(
-        "✅ Verificatiebericht geplaatst!",
-        ephemeral=True
+    await interaction.channel.send(embed=embed, view=VerifyView())
+    await interaction.response.send_message("✅ Verificatie geplaatst.", ephemeral=True)
+
+# ===================== SERVER STATUS COMMAND =====================
+
+@bot.tree.command(
+    name="serverstatus",
+    description="Plaats status van externe servers met links"
+)
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+@app_commands.checks.has_permissions(administrator=True)
+async def serverstatus(
+    interaction: discord.Interaction,
+    server1_name: str,
+    server1_status: str,
+    server1_link: str = None,
+    server2_name: str = None,
+    server2_status: str = None,
+    server2_link: str = None,
+    server3_name: str = None,
+    server3_status: str = None,
+    server3_link: str = None,
+):
+    def format_status(name, status, link):
+        emoji_map = {
+            "online": "🟢",
+            "offline": "🔴",
+            "onderhoud": "🟠"
+        }
+        emoji = emoji_map.get(status.lower(), "🟠")
+        display = f"{emoji} {name}"
+        if link:
+            display = f"[{display}]({link})"
+        return display
+
+    embed = discord.Embed(
+        title="🌐 Nova District • Server Status",
+        color=discord.Color.blurple(),
+        timestamp=datetime.now(timezone.utc)
     )
+
+    embed.add_field(name=format_status(server1_name, server1_status, server1_link), value="Status weergegeven", inline=False)
+    if server2_name and server2_status:
+        embed.add_field(name=format_status(server2_name, server2_status, server2_link), value="Status weergegeven", inline=False)
+    if server3_name and server3_status:
+        embed.add_field(name=format_status(server3_name, server3_status, server3_link), value="Status weergegeven", inline=False)
+
+    embed.set_footer(text="Laatste update")
+
+    await interaction.channel.send(embed=embed)
+    await interaction.response.send_message("✅ Server status geplaatst.", ephemeral=True)
+
+# ===================== DISCORD LINKS COMMAND =====================
+
+@bot.tree.command(
+    name="discordlinks",
+    description="Toon belangrijke Discord links"
+)
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+@app_commands.checks.has_permissions(administrator=True)
+async def discordlinks(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🌐 Nova District • Belangrijke Discords",
+        color=discord.Color.blurple(),
+        timestamp=datetime.now(timezone.utc)
+    )
+
+    embed.add_field(
+        name="💬 Support Discord",
+        value="[Join hier](https://discord.gg/66UMrE8psM)",
+        inline=False
+    )
+    embed.add_field(
+        name="🏛️ Overheid Discord",
+        value="[Join hier](https://discord.gg/QBkYEfQDkV)",
+        inline=False
+    )
+    embed.add_field(
+        name="🕵️ Onderwereld Discord",
+        value="[Join hier](https://discord.gg/nZHCH68QvG)",
+        inline=False
+    )
+
+    embed.set_footer(text="Nova District • Discord Links")
+    await interaction.channel.send(embed=embed)
+    await interaction.response.send_message("✅ Discord links geplaatst!", ephemeral=True)
 
 # ===================== START BOT =====================
 
