@@ -16,6 +16,10 @@ ANTI_NUKE_CHANNEL_ID = 1445772067877294211
 JOIN_LOG_CHANNEL_ID = 1445606304138792980
 LEAVE_LOG_CHANNEL_ID = 1445606375102349312
 
+# Optioneel: minimum account leeftijd (dagen)
+MIN_ACCOUNT_AGE_DAYS = 7
+ENABLE_MIN_AGE_CHECK = True
+
 # ===================== INTENTS =====================
 
 intents = discord.Intents.default()
@@ -27,8 +31,17 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # ===================== VERIFY VIEW =====================
 
 class VerifyView(discord.ui.View):
-    def __init__(self):
+    def __init__(self, use_website=False, website_url=None):
         super().__init__(timeout=None)
+        self.use_website = use_website
+        self.website_url = website_url
+
+        if self.use_website and self.website_url:
+            self.add_item(discord.ui.Button(
+                label="Klik hier om te verifiëren via website",
+                url=self.website_url,
+                style=discord.ButtonStyle.link
+            ))
 
     @discord.ui.button(
         label="Klik Hier Om je Rollen te ontvangen",
@@ -47,6 +60,21 @@ class VerifyView(discord.ui.View):
             )
             return
 
+        # Minimum account leeftijd check
+        if ENABLE_MIN_AGE_CHECK:
+            now = datetime.now(timezone.utc)
+            account_age_days = (now - interaction.user.created_at).days
+            if account_age_days < MIN_ACCOUNT_AGE_DAYS:
+                await interaction.response.send_message(
+                    f"⚠️ Je account is te jong ({account_age_days} dagen). "
+                    "Je kunt nog niet verifiëren.",
+                    ephemeral=True
+                )
+                return
+        else:
+            now = datetime.now(timezone.utc)
+            account_age_days = (now - interaction.user.created_at).days
+
         if role in interaction.user.roles:
             await interaction.response.send_message(
                 "ℹ️ Je bent al geverifieerd.",
@@ -60,10 +88,7 @@ class VerifyView(discord.ui.View):
             ephemeral=True
         )
 
-        # ---------- SECURITY VERIFY LOG ----------
-        now = datetime.now(timezone.utc)
-        account_age_days = (now - interaction.user.created_at).days
-
+        # ------------------- SECURITY LOG -------------------
         embed = discord.Embed(
             title="✅ Verificatie Voltooid",
             color=discord.Color.green(),
@@ -83,7 +108,7 @@ class VerifyView(discord.ui.View):
         )
 
         embed.add_field(
-            name="🏷️ Rol",
+            name="🏷️ Rol Toegekend",
             value=VERIFY_ROLE_NAME,
             inline=False
         )
@@ -110,7 +135,7 @@ async def on_ready():
 
     monitoring = bot.get_channel(MONITORING_CHANNEL_ID)
     if monitoring:
-        await monitoring.send("🟢 Bot is succesvol opgestart")
+        await monitoring.send("🟢 Nova District is succesvol opgestart")
 
 @bot.event
 async def on_member_join(member):
@@ -142,6 +167,10 @@ async def on_guild_channel_delete(channel):
 @app_commands.checks.has_permissions(administrator=True)
 async def verifysetup(interaction: discord.Interaction):
 
+    # Optioneel: voeg externe website link toe als verify
+    website_verify_url = "https://JOUW-WEBSITE-URL"  # vul dit in of laat None
+    view = VerifyView(use_website=True, website_url=website_verify_url)
+
     embed = discord.Embed(
         title="📋 Server Regels & Verificatie",
         description=(
@@ -160,12 +189,12 @@ async def verifysetup(interaction: discord.Interaction):
         color=discord.Color.green()
     )
 
-    await interaction.channel.send(embed=embed, view=VerifyView())
+    await interaction.channel.send(embed=embed, view=view)
     await interaction.response.send_message(
         "✅ Verificatiebericht geplaatst!",
         ephemeral=True
     )
 
-# ===================== START =====================
+# ===================== START BOT =====================
 
 bot.run(os.getenv("TOKEN"))
