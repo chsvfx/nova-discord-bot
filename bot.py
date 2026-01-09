@@ -3,6 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 import os
 
+# -------------------- CONFIG --------------------
 VERIFY_ROLE_NAME = "Inwoner"
 
 MONITORING_CHANNEL = "discord-monitoring"
@@ -11,22 +12,24 @@ ANTI_NUKE_CHANNEL = "discord-anti-nuke"
 JOIN_LOG_CHANNEL = "discord-join-logs"
 LEAVE_LOG_CHANNEL = "discord-leave-logs"
 
-GUILD_ID = 1437438257972379870  # jouw server ID
+GUILD_ID = 1437438257972379870  # <-- JOUW SERVER ID
 
+# -------------------- INTENTS --------------------
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# -------------------- VERIFY VIEW --------------------
+# -------------------- VERIFY VIEW (PERSISTENT) --------------------
 class VerifyView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(
         label="Klik Hier Om je Rollen te ontvangen",
-        style=discord.ButtonStyle.success
+        style=discord.ButtonStyle.success,
+        custom_id="verify_button"
     )
     async def verify(self, interaction: discord.Interaction, button: discord.ui.Button):
         role = discord.utils.get(interaction.guild.roles, name=VERIFY_ROLE_NAME)
@@ -34,7 +37,7 @@ class VerifyView(discord.ui.View):
 
         if not role:
             await interaction.response.send_message(
-                "❌ Rol niet gevonden. Contacteer staff.",
+                "❌ Rol **Inwoner** bestaat niet. Contacteer staff.",
                 ephemeral=True
             )
             return
@@ -53,12 +56,12 @@ class VerifyView(discord.ui.View):
         )
 
         if logs:
-            await logs.send(f"✅ {interaction.user} kreeg rol **Inwoner**")
+            await logs.send(f"✅ {interaction.user} kreeg de rol **Inwoner**")
 
 # -------------------- EVENTS --------------------
 @bot.event
 async def on_ready():
-    await bot.tree.sync()
+    await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
     bot.add_view(VerifyView())
 
     print(f"🟢 Bot online als {bot.user}")
@@ -71,19 +74,19 @@ async def on_ready():
 async def on_member_join(member):
     channel = discord.utils.get(member.guild.text_channels, name=JOIN_LOG_CHANNEL)
     if channel:
-        await channel.send(f"🟢 {member} is gejoined")
+        await channel.send(f"🟢 **{member}** is gejoined")
 
 @bot.event
 async def on_member_remove(member):
     channel = discord.utils.get(member.guild.text_channels, name=LEAVE_LOG_CHANNEL)
     if channel:
-        await channel.send(f"🔴 {member} heeft verlaten")
+        await channel.send(f"🔴 **{member}** heeft de server verlaten")
 
 @bot.event
 async def on_guild_channel_delete(channel):
     logs = discord.utils.get(channel.guild.text_channels, name=ANTI_NUKE_CHANNEL)
     if logs:
-        await logs.send(f"⚠️ Kanaal verwijderd: {channel.name}")
+        await logs.send(f"⚠️ Kanaal verwijderd: **{channel.name}**")
 
 # -------------------- SLASH COMMAND --------------------
 @bot.tree.command(
@@ -99,13 +102,14 @@ async def verifysetup(interaction: discord.Interaction):
             "**Welkom bij Nova District! 🎮**\n\n"
             "📜 **Serverregels:**\n"
             "1️⃣ Respecteer alle leden en staff\n"
-            "2️⃣ Geen spam of reclame\n"
+            "2️⃣ Geen spam, reclame of zelfpromotie\n"
             "3️⃣ Geen NSFW content\n"
-            "4️⃣ Geen discriminatie of haat\n"
+            "4️⃣ Geen discriminatie of haatdragende taal\n"
             "5️⃣ Luister naar staff\n"
             "6️⃣ Geen alts of ban evasion\n"
-            "7️⃣ Gebruik de juiste kanalen\n\n"
-            "🔐 **Klik op de knop hieronder om je rollen te ontvangen.**"
+            "7️⃣ Houd discussies in de juiste kanalen\n\n"
+            "🔐 **Klik op de knop hieronder om je rollen te ontvangen.**\n"
+            "Door te verifiëren ga je akkoord met onze regels."
         ),
         color=discord.Color.green()
     )
@@ -116,5 +120,5 @@ async def verifysetup(interaction: discord.Interaction):
         ephemeral=True
     )
 
-# -------------------- RUN --------------------
+# -------------------- START BOT --------------------
 bot.run(os.getenv("TOKEN"))
