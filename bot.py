@@ -8,7 +8,7 @@ import traceback
 # ===================== CONFIG =====================
 
 GUILD_ID = 1351310078849847358
-MEMBER_ROLE_NAME = "🌿| 𝑀𝑒𝓂𝒷𝑒𝓇"
+MEMBER_ROLE_ID = 1386784222781505619  # <-- Put your actual role ID here
 
 SYSTEM_LOG_CHANNEL_ID = 1461313337089331323
 VERIFY_LOG_CHANNEL_ID = 1461313803156328563
@@ -81,7 +81,7 @@ class VerifyView(discord.ui.View):
 
     @discord.ui.button(label="Verify", style=discord.ButtonStyle.success)
     async def verify(self, interaction: discord.Interaction, _):
-        role = discord.utils.get(interaction.guild.roles, name=MEMBER_ROLE_NAME)
+        role = interaction.guild.get_role(MEMBER_ROLE_ID)
 
         if not role:
             await interaction.response.send_message("❌ Member role not found.", ephemeral=True)
@@ -107,10 +107,11 @@ class VerifyView(discord.ui.View):
             )
             embed.add_field(name="👤 User", value=f"{interaction.user}\n`{interaction.user.id}`", inline=False)
             embed.add_field(name="📅 Account Age", value=f"{years}y {months}m {days}d", inline=False)
-            embed.add_field(name="🏷️ Role", value=MEMBER_ROLE_NAME, inline=False)
+            embed.add_field(name="🏷️ Role", value=role.mention, inline=False)
             embed.set_thumbnail(url=interaction.user.display_avatar.url)
             embed.set_footer(text="Vibe Lounge • Verify Logs")
             await log.send(embed=embed)
+
 
 # ===================== /VERIFY COMMAND =====================
 
