@@ -37,20 +37,29 @@ def account_age(created_at):
     years = days // 365
     months = (days % 365) // 30
     days = (days % 365) % 30
-    return years, months, days
+    return f"{years}y {months}m {days}d"
+
+async def send_log(channel_id, title, user, color=discord.Color.green(), extra_fields=None, thumbnail=True):
+    channel = get_channel(channel_id)
+    if not channel:
+        return
+    embed = discord.Embed(
+        title=title,
+        color=color,
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed.add_field(name="👤 User", value=f"{user}\n`{user.id}`", inline=False)
+    if extra_fields:
+        for name, value, inline in extra_fields:
+            embed.add_field(name=name, value=value, inline=inline)
+    if thumbnail:
+        embed.set_thumbnail(url=user.display_avatar.url)
+    await channel.send(embed=embed)
 
 async def log_system(message: str, color=discord.Color.blurple()):
-    channel = get_channel(SYSTEM_LOG_CHANNEL_ID)
-    if channel:
-        embed = discord.Embed(
-            title="🟢 System Log",
-            description=message,
-            color=color,
-            timestamp=datetime.now(timezone.utc)
-        )
-        await channel.send(embed=embed)
+    await send_log(SYSTEM_LOG_CHANNEL_ID, "🟢 System Log", bot.user, color=color, extra_fields=[("", message, False)], thumbnail=False)
 
-# ===================== /RULES COMMAND =====================
+# ===================== COMMANDS =====================
 
 @bot.tree.command(name="rules", description="View the server rules")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
@@ -73,7 +82,7 @@ async def rules(interaction: discord.Interaction):
     embed.set_footer(text="Vibe Lounge • Server Rules")
     await interaction.response.send_message(embed=embed)
 
-# ===================== VERIFY VIEW =====================
+# ===================== VERIFY =====================
 
 class VerifyView(discord.ui.View):
     def __init__(self):
@@ -88,27 +97,22 @@ class VerifyView(discord.ui.View):
         if role in interaction.user.roles:
             await interaction.response.send_message("ℹ️ You already have the Member role.", ephemeral=True)
             return
-        await interaction.user.add_roles(role, reason="Vibe Lounge Verification")
-        await interaction.response.send_message(
-            "✅ Verify - You received the **Member** role!",
-            ephemeral=True
-        )
-        years, months, days = account_age(interaction.user.created_at)
-        log = get_channel(VERIFY_LOG_CHANNEL_ID)
-        if log:
-            embed = discord.Embed(
-                title="✅ Member Verified",
-                color=discord.Color.green(),
-                timestamp=datetime.now(timezone.utc)
-            )
-            embed.add_field(name="👤 User", value=f"{interaction.user}\n`{interaction.user.id}`", inline=False)
-            embed.add_field(name="📅 Account Age", value=f"{years}y {months}m {days}d", inline=False)
-            embed.add_field(name="🏷️ Role", value=role.mention, inline=False)
-            embed.set_thumbnail(url=interaction.user.display_avatar.url)
-            embed.set_footer(text="Vibe Lounge • Verify Logs")
-            await log.send(embed=embed)
 
-# ===================== /VERIFY COMMAND =====================
+        await interaction.response.defer(ephemeral=True)
+        await interaction.user.add_roles(role, reason="Vibe Lounge Verification")
+        await interaction.followup.send("✅ Verify - You received the **Member** role!", ephemeral=True)
+
+        age = account_age(interaction.user.created_at)
+        await send_log(
+            VERIFY_LOG_CHANNEL_ID,
+            "✅ Member Verified",
+            interaction.user,
+            color=discord.Color.green(),
+            extra_fields=[
+                ("📅 Account Age", age, False),
+                ("🏷️ Role", role.mention, False)
+            ]
+        )
 
 @bot.tree.command(name="verify", description="Verify yourself to access the server")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
@@ -151,10 +155,6 @@ async def on_error(event, *args, **kwargs):
 
 @bot.event
 async def on_member_join(member):
-    log = get_channel(JOIN_LOG_CHANNEL_ID)
-    if not log:
-        return
-    years, months, days = account_age(member.created_at)
     rejoin = RECENT_LEAVES.get(member.id)
     risk = "🟢 Low"
     rejoin_text = "No"
@@ -162,27 +162,19 @@ async def on_member_join(member):
         minutes = int((datetime.now(timezone.utc) - rejoin).total_seconds() / 60)
         rejoin_text = f"Yes ({minutes} min)"
         risk = "🔴 High" if minutes < 10 else "🟡 Medium"
-    embed = discord.Embed(
-        title="🟢 Member Joined",
-        color=discord.Color.green(),
-        timestamp=datetime.now(timezone.utc)
-    )
-    embed.add_field(name="👤 User", value=f"{member}\n`{member.id}`", inline=False)
-    embed.add_field(name="🌍 Type", value="🤖 Bot" if member.bot else "👤 User", inline=False)
-    embed.add_field(name="📅 Account Age", value=f"{years}y {months}m {days}d", inline=False)
-    embed.add_field(name="🕒 Account Created", value=f"<t:{int(member.created_at.timestamp())}:F>", inline=False)
-    embed.add_field(name="🟡 Rejoin", value=rejoin_text, inline=False)
-    embed.add_field(name="🧬 Risk", value=risk, inline=False)
-    embed.set_thumbnail(url=member.display_avatar.url)
-    embed.set_footer(text="Vibe Lounge • Join Logs")
-    await log.send(embed=embed)
+
+    age = account_age(member.created_at)
+    extra_fields = [
+        ("🌍 Type", "🤖 Bot" if member.bot else "👤 User", False),
+        ("📅 Account Age", age, False),
+        ("🕒 Account Created", f"<t:{int(member.created_at.timestamp())}:F>", False),
+        ("🟡 Rejoin", rejoin_text, False),
+        ("🧬 Risk", risk, False)
+    ]
+    await send_log(JOIN_LOG_CHANNEL_ID, "🟢 Member Joined", member, color=discord.Color.green(), extra_fields=extra_fields)
 
 @bot.event
 async def on_member_remove(member):
-    log = get_channel(LEAVE_LOG_CHANNEL_ID)
-    if not log:
-        return
-    years, months, days = account_age(member.created_at)
     roles = [r.mention for r in member.roles if r != member.guild.default_role]
     reason = "Left voluntarily"
     async for entry in member.guild.audit_logs(limit=5):
@@ -192,25 +184,16 @@ async def on_member_remove(member):
             elif entry.action == discord.AuditLogAction.ban:
                 reason = f"Banned by {entry.user}"
             break
-    embed = discord.Embed(
-        title="🔴 Member Left",
-        color=discord.Color.red(),
-        timestamp=datetime.now(timezone.utc)
-    )
-    embed.add_field(name="👤 User", value=f"{member}\n`{member.id}`", inline=False)
-    embed.add_field(name="🌍 Type", value="🤖 Bot" if member.bot else "👤 User", inline=False)
-    embed.add_field(name="📅 Account Age", value=f"{years}y {months}m {days}d", inline=False)
-    embed.add_field(
-        name="🕒 Joined Server",
-        value=f"<t:{int(member.joined_at.timestamp())}:F>" if member.joined_at else "Unknown",
-        inline=False
-    )
-    embed.add_field(name="🧾 Role Count", value=str(len(roles)), inline=False)
-    embed.add_field(name="🏷️ Roles", value=", ".join(roles) if roles else "None", inline=False)
-    embed.add_field(name="📥 Reason", value=reason, inline=False)
-    embed.set_thumbnail(url=member.display_avatar.url)
-    embed.set_footer(text="Vibe Lounge • Leave Logs")
-    await log.send(embed=embed)
+    age = account_age(member.created_at)
+    extra_fields = [
+        ("🌍 Type", "🤖 Bot" if member.bot else "👤 User", False),
+        ("📅 Account Age", age, False),
+        ("🕒 Joined Server", f"<t:{int(member.joined_at.timestamp())}:F>" if member.joined_at else "Unknown", False),
+        ("🧾 Role Count", str(len(roles)), False),
+        ("🏷️ Roles", ", ".join(roles) if roles else "None", False),
+        ("📥 Reason", reason, False)
+    ]
+    await send_log(LEAVE_LOG_CHANNEL_ID, "🔴 Member Left", member, color=discord.Color.red(), extra_fields=extra_fields)
     RECENT_LEAVES[member.id] = datetime.now(timezone.utc)
 
 # ===================== START =====================
