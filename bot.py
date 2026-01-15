@@ -79,7 +79,7 @@ class VerifyView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="𝓥𝓮𝓻𝓲𝓯𝔂", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="Verify", style=discord.ButtonStyle.success)
     async def verify(self, interaction: discord.Interaction, _):
         role = discord.utils.get(interaction.guild.roles, name=MEMBER_ROLE_NAME)
 
@@ -93,7 +93,7 @@ class VerifyView(discord.ui.View):
 
         await interaction.user.add_roles(role, reason="Vibe Lounge Verification")
         await interaction.response.send_message(
-            "✅ 𝓥𝓮𝓻𝓲𝓯𝔂 - You received the **Member** role!",
+            "✅ Verify - You received the **Member** role!",
             ephemeral=True
         )
 
@@ -118,11 +118,11 @@ class VerifyView(discord.ui.View):
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 async def verify(interaction: discord.Interaction):
     embed = discord.Embed(
-        title="🎉 𝓥𝓮𝓻𝓲𝓯𝔂 to Join!",
+        title="🎉 Verify to Join!",
         description=(
             "Welcome to **Vibe Lounge!**\n\n"
             "Click the button below to receive the **Member** role and gain access to the server.\n\n"
-            "💡 Make sure to read the server rules with `/rules` before participating."
+            "💡 Make sure to read the server rules"
         ),
         color=discord.Color.green()
     )
