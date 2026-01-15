@@ -8,7 +8,7 @@ import traceback
 # ===================== CONFIG =====================
 
 GUILD_ID = 1351310078849847358
-MEMBER_ROLE_ID = 1386784222781505619  # <-- Put your actual role ID here
+MEMBER_ROLE_ID = 1386784222781505619
 
 SYSTEM_LOG_CHANNEL_ID = 1461313337089331323
 VERIFY_LOG_CHANNEL_ID = 1461313803156328563
@@ -71,7 +71,7 @@ async def rules(interaction: discord.Interaction):
         color=discord.Color.blurple()
     )
     embed.set_footer(text="Vibe Lounge • Server Rules")
-    await interaction.response.send_message(embed=embed)  # zichtbaar voor iedereen
+    await interaction.response.send_message(embed=embed)
 
 # ===================== VERIFY VIEW =====================
 
@@ -82,21 +82,17 @@ class VerifyView(discord.ui.View):
     @discord.ui.button(label="Verify", style=discord.ButtonStyle.success)
     async def verify(self, interaction: discord.Interaction, _):
         role = interaction.guild.get_role(MEMBER_ROLE_ID)
-
         if not role:
             await interaction.response.send_message("❌ Member role not found.", ephemeral=True)
             return
-
         if role in interaction.user.roles:
             await interaction.response.send_message("ℹ️ You already have the Member role.", ephemeral=True)
             return
-
         await interaction.user.add_roles(role, reason="Vibe Lounge Verification")
         await interaction.response.send_message(
             "✅ Verify - You received the **Member** role!",
             ephemeral=True
         )
-
         years, months, days = account_age(interaction.user.created_at)
         log = get_channel(VERIFY_LOG_CHANNEL_ID)
         if log:
@@ -111,7 +107,6 @@ class VerifyView(discord.ui.View):
             embed.set_thumbnail(url=interaction.user.display_avatar.url)
             embed.set_footer(text="Vibe Lounge • Verify Logs")
             await log.send(embed=embed)
-
 
 # ===================== /VERIFY COMMAND =====================
 
@@ -128,7 +123,7 @@ async def verify(interaction: discord.Interaction):
         color=discord.Color.green()
     )
     embed.set_footer(text="Vibe Lounge • Verification")
-    await interaction.response.send_message(embed=embed, view=VerifyView())  # zichtbaar voor iedereen
+    await interaction.response.send_message(embed=embed, view=VerifyView())
 
 # ===================== EVENTS =====================
 
