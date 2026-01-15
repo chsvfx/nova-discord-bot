@@ -128,7 +128,7 @@ async def verify(interaction: discord.Interaction):
 
 @bot.event
 async def on_ready():
-    bot.add_view(VerifyView())
+    # No bot.add_view() here, non-persistent view is enough
     await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
 
     await log_system(f"Bot **{bot.user}** is now online ✅")
