@@ -40,7 +40,6 @@ def account_age(created_at):
     return years, months, days
 
 async def log_system(message: str, color=discord.Color.blurple()):
-    """Send a system log embed"""
     channel = get_channel(SYSTEM_LOG_CHANNEL_ID)
     if channel:
         embed = discord.Embed(
@@ -51,13 +50,36 @@ async def log_system(message: str, color=discord.Color.blurple()):
         )
         await channel.send(embed=embed)
 
+# ===================== /RULES COMMAND =====================
+
+@bot.tree.command(name="rules", description="View the server rules")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+async def rules(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="📜 Server Rules",
+        description=(
+            "1️⃣ **Be respectful** – Treat everyone with respect.\n"
+            "2️⃣ **No discrimination** – Hate or discrimination is not tolerated.\n"
+            "3️⃣ **No spamming** – No spam, ads or excessive tagging.\n"
+            "4️⃣ **No join/leave abuse** – This results in a permanent ban.\n"
+            "5️⃣ **Stay on topic** – Use the correct channels.\n"
+            "6️⃣ **No impersonation** – Be yourself.\n"
+            "7️⃣ **No self-promotion** – Only with staff permission.\n"
+            "8️⃣ **Appropriate content** – No NSFW or offensive content.\n"
+            "9️⃣ **No spoilers** – Use spoiler tags."
+        ),
+        color=discord.Color.blurple()
+    )
+    embed.set_footer(text="Vibe Lounge • Server Rules")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
 # ===================== VERIFY VIEW =====================
 
 class VerifyView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="✅ Verify", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="Verify", style=discord.ButtonStyle.success)
     async def verify(self, interaction: discord.Interaction, _):
         role = discord.utils.get(interaction.guild.roles, name=MEMBER_ROLE_NAME)
 
@@ -66,19 +88,17 @@ class VerifyView(discord.ui.View):
             return
 
         if role in interaction.user.roles:
-            await interaction.response.send_message("ℹ️ You are already verified.", ephemeral=True)
+            await interaction.response.send_message("ℹ️ You already have the Member role.", ephemeral=True)
             return
 
         await interaction.user.add_roles(role, reason="Vibe Lounge Verification")
         await interaction.response.send_message(
-            "✅ You are now verified. Welcome to **Vibe Lounge**!",
+            "✅ Verify - Click the button to receive the **Member** role!",
             ephemeral=True
         )
 
-        # Verify log
         years, months, days = account_age(interaction.user.created_at)
         log = get_channel(VERIFY_LOG_CHANNEL_ID)
-
         if log:
             embed = discord.Embed(
                 title="✅ Member Verified",
@@ -98,29 +118,15 @@ class VerifyView(discord.ui.View):
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 async def verify(interaction: discord.Interaction):
     embed = discord.Embed(
-        title="‼️ Server Rules",
+        title="🎉 Verify to Join!",
         description=(
-            "**1. Be respectful**\n"
-            "Treat everyone with respect.\n\n"
-            "**2. No discrimination**\n"
-            "Hate or discrimination is not tolerated.\n\n"
-            "**3. No spamming**\n"
-            "No spam, ads or excessive tagging.\n\n"
-            "**4. No join/leave abuse**\n"
-            "This results in a permanent ban.\n\n"
-            "**5. Stay on topic**\n"
-            "Use the correct channels.\n\n"
-            "**6. No impersonation**\n"
-            "Be yourself.\n\n"
-            "**7. No self-promotion**\n"
-            "Only with staff permission.\n\n"
-            "**8. Appropriate content**\n"
-            "No NSFW or offensive content.\n\n"
-            "**9. No spoilers**\n"
-            "Use spoiler tags."
+            "Welcome to **Vibe Lounge!**\n\n"
+            "Click the button below to receive the **Member** role and gain access to the server.\n\n"
+            "💡 Make sure to read the server rules with `/rules` before participating."
         ),
-        color=discord.Color.blurple()
+        color=discord.Color.green()
     )
+    embed.set_thumbnail(url=interaction.user.display_avatar.url)
     embed.set_footer(text="Vibe Lounge • Verification")
     await interaction.response.send_message(embed=embed, view=VerifyView())
 
@@ -128,9 +134,7 @@ async def verify(interaction: discord.Interaction):
 
 @bot.event
 async def on_ready():
-    # No bot.add_view() here, non-persistent view is enough
     await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-
     await log_system(f"Bot **{bot.user}** is now online ✅")
     print(f"🟢 Logged in as {bot.user}")
 
@@ -155,33 +159,27 @@ async def on_member_join(member):
     log = get_channel(JOIN_LOG_CHANNEL_ID)
     if not log:
         return
-
     years, months, days = account_age(member.created_at)
     rejoin = RECENT_LEAVES.get(member.id)
     risk = "🟢 Low"
     rejoin_text = "No"
-
     if rejoin:
         minutes = int((datetime.now(timezone.utc) - rejoin).total_seconds() / 60)
         rejoin_text = f"Yes ({minutes} min)"
         risk = "🔴 High" if minutes < 10 else "🟡 Medium"
-
     embed = discord.Embed(
         title="🟢 Member Joined",
         color=discord.Color.green(),
         timestamp=datetime.now(timezone.utc)
     )
-
     embed.add_field(name="👤 User", value=f"{member}\n`{member.id}`", inline=False)
     embed.add_field(name="🌍 Type", value="🤖 Bot" if member.bot else "👤 User", inline=False)
     embed.add_field(name="📅 Account Age", value=f"{years}y {months}m {days}d", inline=False)
     embed.add_field(name="🕒 Account Created", value=f"<t:{int(member.created_at.timestamp())}:F>", inline=False)
     embed.add_field(name="🟡 Rejoin", value=rejoin_text, inline=False)
     embed.add_field(name="🧬 Risk", value=risk, inline=False)
-
     embed.set_thumbnail(url=member.display_avatar.url)
     embed.set_footer(text="Vibe Lounge • Join Logs")
-
     await log.send(embed=embed)
 
 @bot.event
@@ -189,11 +187,9 @@ async def on_member_remove(member):
     log = get_channel(LEAVE_LOG_CHANNEL_ID)
     if not log:
         return
-
     years, months, days = account_age(member.created_at)
     roles = [r.mention for r in member.roles if r != member.guild.default_role]
     reason = "Left voluntarily"
-
     async for entry in member.guild.audit_logs(limit=5):
         if entry.target and entry.target.id == member.id:
             if entry.action == discord.AuditLogAction.kick:
@@ -201,13 +197,11 @@ async def on_member_remove(member):
             elif entry.action == discord.AuditLogAction.ban:
                 reason = f"Banned by {entry.user}"
             break
-
     embed = discord.Embed(
         title="🔴 Member Left",
         color=discord.Color.red(),
         timestamp=datetime.now(timezone.utc)
     )
-
     embed.add_field(name="👤 User", value=f"{member}\n`{member.id}`", inline=False)
     embed.add_field(name="🌍 Type", value="🤖 Bot" if member.bot else "👤 User", inline=False)
     embed.add_field(name="📅 Account Age", value=f"{years}y {months}m {days}d", inline=False)
@@ -219,10 +213,8 @@ async def on_member_remove(member):
     embed.add_field(name="🧾 Role Count", value=str(len(roles)), inline=False)
     embed.add_field(name="🏷️ Roles", value=", ".join(roles) if roles else "None", inline=False)
     embed.add_field(name="📥 Reason", value=reason, inline=False)
-
     embed.set_thumbnail(url=member.display_avatar.url)
     embed.set_footer(text="Vibe Lounge • Leave Logs")
-
     await log.send(embed=embed)
     RECENT_LEAVES[member.id] = datetime.now(timezone.utc)
 
