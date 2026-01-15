@@ -3,6 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 from datetime import datetime, timezone
 import os
+import traceback
 
 # ===================== CONFIG =====================
 
@@ -37,6 +38,18 @@ def account_age(created_at):
     months = (days % 365) // 30
     days = (days % 365) % 30
     return years, months, days
+
+async def log_system(message: str, color=discord.Color.blurple()):
+    """Send a system log embed"""
+    channel = get_channel(SYSTEM_LOG_CHANNEL_ID)
+    if channel:
+        embed = discord.Embed(
+            title="🟢 System Log",
+            description=message,
+            color=color,
+            timestamp=datetime.now(timezone.utc)
+        )
+        await channel.send(embed=embed)
 
 # ===================== VERIFY VIEW =====================
 
@@ -118,11 +131,24 @@ async def on_ready():
     bot.add_view(VerifyView())
     await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
 
-    log = get_channel(SYSTEM_LOG_CHANNEL_ID)
-    if log:
-        await log.send("🟢 **Vibe Lounge system online**")
-
+    await log_system(f"Bot **{bot.user}** is now online ✅")
     print(f"🟢 Logged in as {bot.user}")
+
+@bot.event
+async def on_disconnect():
+    await log_system(f"Bot **{bot.user}** disconnected ⚠️", color=discord.Color.orange())
+    print(f"⚠️ {bot.user} disconnected")
+
+@bot.event
+async def on_resumed():
+    await log_system(f"Bot **{bot.user}** resumed connection ✅", color=discord.Color.green())
+    print(f"🟢 {bot.user} resumed")
+
+@bot.event
+async def on_error(event, *args, **kwargs):
+    err = traceback.format_exc()
+    await log_system(f"⚠️ Error in `{event}`:\n```{err}```", color=discord.Color.red())
+    print(f"⚠️ Error in {event}:\n{err}")
 
 @bot.event
 async def on_member_join(member):
@@ -198,7 +224,6 @@ async def on_member_remove(member):
     embed.set_footer(text="Vibe Lounge • Leave Logs")
 
     await log.send(embed=embed)
-
     RECENT_LEAVES[member.id] = datetime.now(timezone.utc)
 
 # ===================== START =====================
