@@ -59,7 +59,7 @@ def account_age(created_at):
     days = (days % 365) % 30
     return f"{years}y {months}m {days}d"
 
-async def send_log(channel_id, title, user, color, extra_fields=None, thumbnail=True):
+async def send_log(channel_id, title, user, color, extra_fields=None):
     channel = get_channel(channel_id)
     if not channel:
         return
@@ -77,17 +77,13 @@ async def send_log(channel_id, title, user, color, extra_fields=None, thumbnail=
     if extra_fields:
         for name, value, inline in extra_fields:
             embed.add_field(name=name, value=value, inline=inline)
-    if thumbnail:
-        embed.set_thumbnail(url=user.display_avatar.url)
     await channel.send(embed=embed)
 
 async def log_system(message, color=discord.Color.blurple()):
-    await send_log(SYSTEM_LOG_CHANNEL_ID, "🟢 System Log", bot.user, color=color, extra_fields=[("", message, False)], thumbnail=False)
+    await send_log(SYSTEM_LOG_CHANNEL_ID, "🟢 System Log", bot.user, color=color, extra_fields=[("", message, False)])
 
 def shorten_error(error: str, max_length=900):
-    if len(error) <= max_length:
-        return error
-    return error[:max_length] + "\n... (truncated)"
+    return error if len(error) <= max_length else error[:max_length] + "\n... (truncated)"
 
 # ===================== STATUS EMBED =====================
 
@@ -115,8 +111,6 @@ def build_status_embed(status_key: str):
     embed.add_field(name="> STATUS", value=f"```\n{cfg['text']}\n```", inline=True)
     embed.add_field(name="> UPTIME", value=f"```\n{format_uptime()}\n```", inline=True)
     embed.add_field(name="> LAST START", value=f"```\n<t:{int(BOT_START_TIME.timestamp())}:R>\n```", inline=False)
-    embed.set_image("https://forum-cfx-re.akamaized.net/original/5X/e/e/c/b/eecb4664ee03d39e34fcd82a075a18c24add91ed.png")
-    embed.set_thumbnail("https://forum-cfx-re.akamaized.net/original/5X/9/b/d/7/9bd744dc2b21804e18c3bb331e8902c930624e44.png")
     embed.set_footer(text="Auto-updating • Do not delete")
     return embed
 
@@ -222,7 +216,6 @@ async def on_error(event, *args, **kwargs):
     embed.add_field(name="📌 Event", value=f"`{event}`", inline=False)
     embed.add_field(name="🧨 Error Details", value=f"```py\n{error}\n```", inline=False)
     embed.set_footer(text="Latest error only • Previous errors removed")
-    embed.set_thumbnail(url=bot.user.display_avatar.url)
     msg = await channel.send(embed=embed)
     LAST_ERROR_MESSAGE_ID = msg.id
     print(error)
