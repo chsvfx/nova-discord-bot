@@ -3,14 +3,15 @@ from discord.ext import commands
 from discord import app_commands
 from datetime import datetime, timezone
 import asyncio
-import yt_dlp
 from collections import deque
 import json
 import os
 import traceback
+import yt_dlp
+import imageio_ffmpeg
 
 # ===================== CONFIG =====================
-
+TOKEN = os.getenv("TOKEN")
 GUILD_ID = 1351310078849847358
 MEMBER_ROLE_ID = 1386784222781505619
 
@@ -18,26 +19,22 @@ SYSTEM_LOG_CHANNEL_ID = 1462412675295481971
 VERIFY_LOG_CHANNEL_ID = 1462412645150752890
 JOIN_LOG_CHANNEL_ID = 1462412615195164908
 LEAVE_LOG_CHANNEL_ID = 1462412568747573422
-BOT_STATUS_CHANNEL_ID = 1462406299936362516  # Status + Errors
+BOT_STATUS_CHANNEL_ID = 1462406299936362516
 
 STATUS_FILE = "status_data.json"
-TOKEN = os.getenv("TOKEN")
 
 # ===================== INTENTS =====================
-
 intents = discord.Intents.default()
 intents.members = True
 intents.voice_states = True
 intents.guilds = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-
 BOT_START_TIME = datetime.now(timezone.utc)
 RECENT_LEAVES = {}
 guild_queues: dict[int, deque] = {}
 
 # ===================== JSON HELPERS =====================
-
 def load_status_data():
     if not os.path.exists(STATUS_FILE):
         return {"message_id": None}
@@ -49,7 +46,6 @@ def save_status_data(data):
         json.dump(data, f, indent=4)
 
 # ===================== LOGGING =====================
-
 async def send_log(channel_id, title, description, color):
     channel = bot.get_channel(channel_id)
     if not channel:
@@ -63,7 +59,6 @@ async def send_log(channel_id, title, description, color):
     await channel.send(embed=embed)
 
 # ===================== STATUS SYSTEM =====================
-
 def build_status_embed(state: str):
     colors = {"online": discord.Color.green(), "offline": discord.Color.red(), "restart": discord.Color.orange()}
     texts = {"online": "🟢 Online", "offline": "🔴 Offline", "restart": "🟡 Restarting"}
@@ -103,7 +98,6 @@ async def status_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(embed=build_status_embed("online"), ephemeral=True)
 
 # ===================== VERIFY SYSTEM =====================
-
 class VerifyView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -112,7 +106,7 @@ class VerifyView(discord.ui.View):
     async def verify(self, interaction: discord.Interaction, _):
         role = interaction.guild.get_role(MEMBER_ROLE_ID)
         if role in interaction.user.roles:
-            await interaction.response.send_message("ℹ️ You are already verified.", ephemeral=True)
+            await interaction.response.send_message("ℹ️ Already verified.", ephemeral=True)
             return
         await interaction.user.add_roles(role, reason="Verification")
         await interaction.response.send_message("✅ You are now verified!", ephemeral=True)
@@ -134,111 +128,64 @@ async def verify(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=VerifyView())
 
 # ===================== MEMBER EVENTS =====================
-
 @bot.event
 async def on_member_join(member):
-    await send_log(
-        JOIN_LOG_CHANNEL_ID,
-        "🟢 Member Joined",
-        f"{member} (`{member.id}`)",
-        discord.Color.green()
-    )
+    await send_log(JOIN_LOG_CHANNEL_ID, "🟢 Member Joined", f"{member} (`{member.id}`)", discord.Color.green())
 
 @bot.event
 async def on_member_remove(member):
     RECENT_LEAVES[member.id] = datetime.now(timezone.utc)
-    await send_log(
-        LEAVE_LOG_CHANNEL_ID,
-        "🔴 Member Left",
-        f"{member} (`{member.id}`)",
-        discord.Color.red()
-    )
-
-@bot.event
-async def on_member_update(before, after):
-    if before.nick != after.nick:
-        await send_log(
-            SYSTEM_LOG_CHANNEL_ID,
-            "✏️ Nickname Changed",
-            f"**{before}** → **{after.nick or after.name}**",
-            discord.Color.orange()
-        )
-    if before.roles != after.roles:
-        removed = set(before.roles) - set(after.roles)
-        added = set(after.roles) - set(before.roles)
-        for r in added:
-            await send_log(
-                SYSTEM_LOG_CHANNEL_ID,
-                "➕ Role Added",
-                f"{after.mention} received {r.mention}",
-                discord.Color.green()
-            )
-        for r in removed:
-            await send_log(
-                SYSTEM_LOG_CHANNEL_ID,
-                "➖ Role Removed",
-                f"{after.mention} lost {r.mention}",
-                discord.Color.red()
-            )
-
-# ===================== MESSAGE DELETE =====================
-
-@bot.event
-async def on_message_delete(message):
-    if message.author.bot:
-        return
-    await send_log(
-        SYSTEM_LOG_CHANNEL_ID,
-        "🗑️ Message Deleted",
-        f"**Author:** {message.author}\n**Content:** {message.content or 'Empty'}",
-        discord.Color.red()
-    )
+    await send_log(LEAVE_LOG_CHANNEL_ID, "🔴 Member Left", f"{member} (`{member.id}`)", discord.Color.red())
 
 # ===================== MUSIC SYSTEM =====================
-
 YDL_OPTIONS = {"format": "bestaudio/best", "quiet": True, "noplaylist": True}
+FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()  # Static ffmpeg for Railway
 
 async def play_next(guild_id):
     guild = bot.get_guild(guild_id)
     if not guild:
         return
-    voice = guild.voice_client
+    vc = guild.voice_client
     queue = guild_queues.get(guild_id)
-    if not voice or not queue:
+    if not vc or not queue:
         return
     if len(queue) == 0:
-        await voice.disconnect()
+        await vc.disconnect()
         return
     song = queue.popleft()
-    source = await discord.FFmpegOpusAudio.from_probe(song["url"])
-    voice.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(guild_id), bot.loop))
+    source = await discord.FFmpegOpusAudio.from_probe(song["url"], executable=FFMPEG_PATH)
+    vc.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(guild_id), bot.loop))
 
-# ===================== ORIGINAL SIMPLE PLAY COMMAND =====================
-
-async def play_link(vc, url):
-    with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-        info = ydl.extract_info(url, download=False)
-        audio_url = info["url"]
-        source = await discord.FFmpegOpusAudio.from_probe(audio_url)
-        vc.play(source)
-
-@bot.tree.command(name="play", description="Play a YouTube link")
+@bot.tree.command(name="play", description="Play music from YouTube")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
-async def play(interaction: discord.Interaction, url: str):
+async def play(interaction: discord.Interaction, query: str):
     if not interaction.user.voice:
         await interaction.response.send_message("❌ Join a voice channel first.", ephemeral=True)
         return
 
+    await interaction.response.defer(ephemeral=True)
     vc = interaction.guild.voice_client
     if not vc:
         vc = await interaction.user.voice.channel.connect()
 
-    await interaction.response.defer(ephemeral=True)
+    queue = guild_queues.setdefault(interaction.guild.id, deque())
+
     try:
-        await play_link(vc, url)
-        await interaction.followup.send(f"▶️ Now playing: {url}")
+        with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+            if "youtube.com/watch" in query or "youtu.be/" in query:
+                info = ydl.extract_info(query, download=False)
+            else:
+                search = ydl.extract_info(f"ytsearch:{query}", download=False)
+                if "entries" not in search or len(search["entries"]) == 0:
+                    await interaction.followup.send("❌ No results found.", ephemeral=True)
+                    return
+                info = search["entries"][0]
+            queue.append({"title": info["title"], "url": info["url"]})
+            if not vc.is_playing():
+                await play_next(interaction.guild.id)
+            await interaction.followup.send(f"▶️ Now playing **{info['title']}**")
     except Exception as e:
-        await interaction.followup.send(f"❌ Error: {e}")
+        await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 @bot.tree.command(name="skip", description="Skip current song")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
@@ -248,16 +195,16 @@ async def skip(interaction: discord.Interaction):
         vc.stop()
         await interaction.response.send_message("⏭️ Skipped.", ephemeral=True)
 
-@bot.tree.command(name="stop", description="Stop music")
+@bot.tree.command(name="stop", description="Stop music and clear queue")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 async def stop(interaction: discord.Interaction):
     vc = interaction.guild.voice_client
     if vc:
         await vc.disconnect()
+    guild_queues.get(interaction.guild.id, deque()).clear()
     await interaction.response.send_message("⏹️ Stopped.", ephemeral=True)
 
 # ===================== CORE EVENTS =====================
-
 @bot.event
 async def on_ready():
     guild = discord.Object(id=GUILD_ID)
@@ -272,13 +219,7 @@ async def on_disconnect():
 @bot.event
 async def on_error(event, *args, **kwargs):
     err = traceback.format_exc(limit=4)
-    await send_log(
-        BOT_STATUS_CHANNEL_ID,
-        "⚠️ Bot Error",
-        f"```{err}```",
-        discord.Color.red()
-    )
+    await send_log(BOT_STATUS_CHANNEL_ID, "⚠️ Bot Error", f"```{err}```", discord.Color.red())
 
 # ===================== START =====================
-
 bot.run(TOKEN)
