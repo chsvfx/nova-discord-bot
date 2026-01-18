@@ -213,36 +213,32 @@ async def play_next(guild_id):
     source = await discord.FFmpegOpusAudio.from_probe(song["url"])
     voice.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(guild_id), bot.loop))
 
-@bot.tree.command(name="play", description="Play music from YouTube")
+# ===================== ORIGINAL SIMPLE PLAY COMMAND =====================
+
+async def play_link(vc, url):
+    with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+        info = ydl.extract_info(url, download=False)
+        audio_url = info["url"]
+        source = await discord.FFmpegOpusAudio.from_probe(audio_url)
+        vc.play(source)
+
+@bot.tree.command(name="play", description="Play a YouTube link")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
-async def play(interaction: discord.Interaction, query: str):
+async def play(interaction: discord.Interaction, url: str):
     if not interaction.user.voice:
         await interaction.response.send_message("❌ Join a voice channel first.", ephemeral=True)
         return
 
-    await interaction.response.defer(ephemeral=True)
     vc = interaction.guild.voice_client
     if not vc:
         vc = await interaction.user.voice.channel.connect()
 
-    queue = guild_queues.setdefault(interaction.guild.id, deque())
-
+    await interaction.response.defer(ephemeral=True)
     try:
-        with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-            if "youtube.com/watch" in query or "youtu.be/" in query:
-                info = ydl.extract_info(query, download=False)
-            else:
-                search = ydl.extract_info(f"ytsearch:{query}", download=False)
-                if "entries" not in search or len(search["entries"]) == 0:
-                    await interaction.followup.send("❌ No results found.", ephemeral=True)
-                    return
-                info = search["entries"][0]
-            queue.append({"title": info["title"], "url": info["url"]})
-            if not vc.is_playing():
-                await play_next(interaction.guild.id)
-            await interaction.followup.send(f"▶️ Now playing **{info['title']}**")
+        await play_link(vc, url)
+        await interaction.followup.send(f"▶️ Now playing: {url}")
     except Exception as e:
-        await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+        await interaction.followup.send(f"❌ Error: {e}")
 
 @bot.tree.command(name="skip", description="Skip current song")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
@@ -252,25 +248,13 @@ async def skip(interaction: discord.Interaction):
         vc.stop()
         await interaction.response.send_message("⏭️ Skipped.", ephemeral=True)
 
-@bot.tree.command(name="stop", description="Stop music and clear queue")
+@bot.tree.command(name="stop", description="Stop music")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 async def stop(interaction: discord.Interaction):
     vc = interaction.guild.voice_client
     if vc:
         await vc.disconnect()
-    guild_queues.get(interaction.guild.id, deque()).clear()
     await interaction.response.send_message("⏹️ Stopped.", ephemeral=True)
-
-@bot.tree.command(name="queue", description="View queue")
-@app_commands.guilds(discord.Object(id=GUILD_ID))
-async def queue_cmd(interaction: discord.Interaction):
-    queue = guild_queues.get(interaction.guild.id)
-    if not queue:
-        await interaction.response.send_message("📭 Queue empty.", ephemeral=True)
-        return
-    text = "\n".join(f"{i+1}. {s['title']}" for i, s in enumerate(queue))
-    embed = discord.Embed(title="🎶 Queue", description=text, color=discord.Color.green())
-    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ===================== CORE EVENTS =====================
 
