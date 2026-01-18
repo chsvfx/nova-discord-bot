@@ -2,4 +2,4 @@ discord.py[voice]
 yt-dlp
 PyNaCl
 yt-dlp
-ffmpeg-static
+imageio-ffmpeg
