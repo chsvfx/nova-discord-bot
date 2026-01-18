@@ -5,35 +5,28 @@ from datetime import datetime, timezone
 import asyncio
 import yt_dlp
 from collections import deque
-import json
 import os
-import traceback
-import imageio_ffmpeg
+import json
 
 # ===================== CONFIG =====================
 TOKEN = os.getenv("TOKEN")
 GUILD_ID = 1351310078849847358
 MEMBER_ROLE_ID = 1386784222781505619
-
-SYSTEM_LOG_CHANNEL_ID = 1462412675295481971
+BOT_STATUS_CHANNEL_ID = 1462406299936362516
 VERIFY_LOG_CHANNEL_ID = 1462412645150752890
 JOIN_LOG_CHANNEL_ID = 1462412615195164908
 LEAVE_LOG_CHANNEL_ID = 1462412568747573422
-BOT_STATUS_CHANNEL_ID = 1462406299936362516
-
+SYSTEM_LOG_CHANNEL_ID = 1462412675295481971
 STATUS_FILE = "status_data.json"
 
-# ===================== INTENTS =====================
 intents = discord.Intents.default()
 intents.members = True
 intents.voice_states = True
 intents.guilds = True
-intents.message_content = True  # optional if you use message commands
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 BOT_START_TIME = datetime.now(timezone.utc)
-RECENT_LEAVES = {}
 guild_queues: dict[int, deque] = {}
 
 # ===================== JSON HELPERS =====================
@@ -141,7 +134,6 @@ async def on_member_join(member):
 
 @bot.event
 async def on_member_remove(member):
-    RECENT_LEAVES[member.id] = datetime.now(timezone.utc)
     await send_log(
         LEAVE_LOG_CHANNEL_ID,
         "🔴 Member Left",
@@ -149,48 +141,14 @@ async def on_member_remove(member):
         discord.Color.red()
     )
 
-@bot.event
-async def on_member_update(before, after):
-    if before.nick != after.nick:
-        await send_log(
-            SYSTEM_LOG_CHANNEL_ID,
-            "✏️ Nickname Changed",
-            f"**{before}** → **{after.nick or after.name}**",
-            discord.Color.orange()
-        )
-    if before.roles != after.roles:
-        removed = set(before.roles) - set(after.roles)
-        added = set(after.roles) - set(before.roles)
-        for r in added:
-            await send_log(
-                SYSTEM_LOG_CHANNEL_ID,
-                "➕ Role Added",
-                f"{after.mention} received {r.mention}",
-                discord.Color.green()
-            )
-        for r in removed:
-            await send_log(
-                SYSTEM_LOG_CHANNEL_ID,
-                "➖ Role Removed",
-                f"{after.mention} lost {r.mention}",
-                discord.Color.red()
-            )
-
-@bot.event
-async def on_message_delete(message):
-    if message.author.bot:
-        return
-    await send_log(
-        SYSTEM_LOG_CHANNEL_ID,
-        "🗑️ Message Deleted",
-        f"**Author:** {message.author}\n**Content:** {message.content or 'Empty'}",
-        discord.Color.red()
-    )
-
 # ===================== MUSIC SYSTEM =====================
+import imageio_ffmpeg
+from discord import FFmpegPCMAudio
+
 FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
+
 YDL_OPTIONS = {
-    "format": "bestaudio[ext=webm]/bestaudio/best",
+    "format": "bestaudio[ext=m4a]/bestaudio/best",
     "quiet": True,
     "noplaylist": True
 }
@@ -199,16 +157,16 @@ async def play_next(guild_id):
     guild = bot.get_guild(guild_id)
     if not guild:
         return
-    voice = guild.voice_client
+    vc = guild.voice_client
     queue = guild_queues.get(guild_id)
-    if not voice or not queue:
+    if not vc or not queue:
         return
     if len(queue) == 0:
-        await voice.disconnect()
+        await vc.disconnect()
         return
     song = queue.popleft()
-    source = discord.FFmpegPCMAudio(song["url"], executable=FFMPEG_PATH, options="-vn")
-    voice.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(guild_id), bot.loop))
+    source = FFmpegPCMAudio(song["url"], executable=FFMPEG_PATH, options="-vn")
+    vc.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(guild_id), bot.loop))
 
 @bot.tree.command(name="play", description="Play music from YouTube")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
@@ -269,27 +227,16 @@ async def queue_cmd(interaction: discord.Interaction):
     embed = discord.Embed(title="🎶 Queue", description=text, color=discord.Color.green())
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# ===================== CORE EVENTS =====================
+# ===================== EVENTS =====================
 @bot.event
 async def on_ready():
-    guild = discord.Object(id=GUILD_ID)
-    await bot.tree.sync(guild=guild)
+    await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
     await send_or_edit_status("online")
-    print(f"Logged in as {bot.user} | Commands synced in guild {GUILD_ID}")
+    print(f"Logged in as {bot.user}")
 
 @bot.event
 async def on_disconnect():
     await send_or_edit_status("offline")
 
-@bot.event
-async def on_error(event, *args, **kwargs):
-    err = traceback.format_exc(limit=4)
-    await send_log(
-        BOT_STATUS_CHANNEL_ID,
-        "⚠️ Bot Error",
-        f"```{err}```",
-        discord.Color.red()
-    )
-
-# ===================== START =====================
+# ===================== START BOT =====================
 bot.run(TOKEN)
