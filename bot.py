@@ -2,9 +2,12 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from datetime import datetime, timezone
+import asyncio
+import yt_dlp
+from collections import deque
+import json
 import os
 import traceback
-import json
 
 # ===================== CONFIG =====================
 
@@ -19,118 +22,102 @@ BOT_STATUS_CHANNEL_ID = 1462406299936362516  # Status + Errors
 
 STATUS_FILE = "status_data.json"
 
+TOKEN = os.getenv("TOKEN")
+
 # ===================== INTENTS =====================
 
 intents = discord.Intents.default()
 intents.members = True
-intents.message_content = True
+intents.message_content = False
+intents.voice_states = True
+intents.guilds = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ===================== MEMORY =====================
-
-RECENT_LEAVES = {}
 BOT_START_TIME = datetime.now(timezone.utc)
 
-# Load persistent status message
-try:
+# ===================== STORAGE =====================
+
+RECENT_LEAVES = {}
+guild_queues: dict[int, deque] = {}
+
+# ===================== JSON HELPERS =====================
+
+def load_status_data():
+    if not os.path.exists(STATUS_FILE):
+        return {"message_id": None}
     with open(STATUS_FILE, "r") as f:
-        status_data = json.load(f)
-except:
-    status_data = {"status_message_id": None}
-
-STATUS_MESSAGE_ID = status_data.get("status_message_id")
-LAST_ERROR_MESSAGE_ID = None
-
-# ===================== HELPERS =====================
+        return json.load(f)
 
 def save_status_data(data):
     with open(STATUS_FILE, "w") as f:
-        json.dump(data, f)
+        json.dump(data, f, indent=4)
 
-def get_channel(cid):
-    return bot.get_channel(cid)
+# ===================== LOGGING =====================
 
-def account_age(created_at):
-    now = datetime.now(timezone.utc)
-    days = (now - created_at).days
-    years = days // 365
-    months = (days % 365) // 30
-    days = (days % 365) % 30
-    return f"{years}y {months}m {days}d"
-
-async def send_log(channel_id, title, user, color, extra_fields=None):
-    channel = get_channel(channel_id)
+async def send_log(channel_id, title, description, color):
+    channel = bot.get_channel(channel_id)
     if not channel:
         return
-
     embed = discord.Embed(
         title=title,
+        description=description,
         color=color,
         timestamp=datetime.now(timezone.utc)
     )
-    embed.add_field(
-        name="👤 User",
-        value=f"{user.mention}\n`{user.id}`",
-        inline=False
-    )
-    if extra_fields:
-        for name, value, inline in extra_fields:
-            embed.add_field(name=name, value=value, inline=inline)
     await channel.send(embed=embed)
 
-async def log_system(message, color=discord.Color.blurple()):
-    await send_log(SYSTEM_LOG_CHANNEL_ID, "🟢 System Log", bot.user, color=color, extra_fields=[("", message, False)])
+# ===================== STATUS SYSTEM =====================
 
-def shorten_error(error: str, max_length=900):
-    return error if len(error) <= max_length else error[:max_length] + "\n... (truncated)"
+def build_status_embed(state: str):
+    colors = {
+        "online": discord.Color.green(),
+        "offline": discord.Color.red(),
+        "restart": discord.Color.orange()
+    }
+    texts = {
+        "online": "🟢 Online",
+        "offline": "🔴 Offline",
+        "restart": "🟡 Restarting"
+    }
 
-# ===================== STATUS EMBED =====================
+    uptime = datetime.now(timezone.utc) - BOT_START_TIME
 
-STATUS_CONFIG = {
-    "online": {"text": "🟢 Online", "color": discord.Color.green()},
-    "offline": {"text": "🔴 Offline", "color": discord.Color.red()},
-    "partial": {"text": "🔄 Restarting", "color": discord.Color.orange()}
-}
-
-def format_uptime():
-    delta = datetime.now(timezone.utc) - BOT_START_TIME
-    days = delta.days
-    hours, rem = divmod(delta.seconds, 3600)
-    minutes, _ = divmod(rem, 60)
-    return f"{days}d {hours}h {minutes}m"
-
-def build_status_embed(status_key: str):
-    cfg = STATUS_CONFIG[status_key]
     embed = discord.Embed(
-        title="Vibe Lounge Bot",
-        description="Live bot status monitor",
-        color=cfg["color"],
+        title="🤖 Bot Status",
+        color=colors[state],
         timestamp=datetime.now(timezone.utc)
     )
-    embed.add_field(name="> STATUS", value=f"```\n{cfg['text']}\n```", inline=True)
-    embed.add_field(name="> UPTIME", value=f"```\n{format_uptime()}\n```", inline=True)
-    embed.add_field(name="> LAST START", value=f"```\n<t:{int(BOT_START_TIME.timestamp())}:R>\n```", inline=False)
-    embed.set_footer(text="Auto-updating • Do not delete")
+    embed.add_field(name="> STATUS", value=f"```\n{texts[state]}\n```", inline=True)
+    embed.add_field(name="> UPTIME", value=f"```\n{str(uptime).split('.')[0]}\n```", inline=True)
+    embed.set_footer(text="Auto-updating status • Do not delete")
     return embed
 
-async def send_or_edit_status(status_key: str):
-    global STATUS_MESSAGE_ID, status_data
+async def send_or_edit_status(state: str):
     channel = bot.get_channel(BOT_STATUS_CHANNEL_ID)
     if not channel:
         return
-    embed = build_status_embed(status_key)
-    if STATUS_MESSAGE_ID:
-        try:
-            msg = await channel.fetch_message(STATUS_MESSAGE_ID)
+
+    data = load_status_data()
+    embed = build_status_embed(state)
+
+    try:
+        if data["message_id"]:
+            msg = await channel.fetch_message(data["message_id"])
             await msg.edit(embed=embed)
-            return
-        except discord.NotFound:
-            STATUS_MESSAGE_ID = None
-    msg = await channel.send(embed=embed)
-    STATUS_MESSAGE_ID = msg.id
-    status_data["status_message_id"] = STATUS_MESSAGE_ID
-    save_status_data(status_data)
+        else:
+            msg = await channel.send(embed=embed)
+            data["message_id"] = msg.id
+            save_status_data(data)
+    except:
+        msg = await channel.send(embed=embed)
+        data["message_id"] = msg.id
+        save_status_data(data)
+
+@bot.tree.command(name="status", description="Show bot status")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+async def status_cmd(interaction: discord.Interaction):
+    await interaction.response.send_message(embed=build_status_embed("online"), ephemeral=True)
 
 # ===================== VERIFY =====================
 
@@ -141,107 +128,39 @@ class VerifyView(discord.ui.View):
     @discord.ui.button(label="Verify", style=discord.ButtonStyle.success)
     async def verify(self, interaction: discord.Interaction, _):
         role = interaction.guild.get_role(MEMBER_ROLE_ID)
-        if not role:
-            await interaction.response.send_message("❌ Member role not found.", ephemeral=True)
-            return
         if role in interaction.user.roles:
-            await interaction.response.send_message("ℹ️ Already verified.", ephemeral=True)
+            await interaction.response.send_message("ℹ️ You are already verified.", ephemeral=True)
             return
-        await interaction.response.defer(ephemeral=True)
-        await interaction.user.add_roles(role, reason="Server verification")
-        await interaction.followup.send("✅ You have been verified!", ephemeral=True)
+
+        await interaction.user.add_roles(role, reason="Verification")
+        await interaction.response.send_message("✅ You are now verified!", ephemeral=True)
+
         await send_log(
             VERIFY_LOG_CHANNEL_ID,
             "✅ Member Verified",
-            interaction.user,
-            discord.Color.green(),
-            extra_fields=[
-                ("📅 Account Age", account_age(interaction.user.created_at), False),
-                ("🏷️ Role", role.mention, False)
-            ]
+            f"{interaction.user.mention} received **Member** role",
+            discord.Color.green()
         )
 
-@bot.tree.command(name="verify", description="Verify yourself to access the server")
+@bot.tree.command(name="verify", description="Verify yourself")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 async def verify(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🎉 Verification",
-        description="Click the button below to receive the **Member** role.",
+        description="Click the button below to verify.",
         color=discord.Color.green()
     )
     await interaction.response.send_message(embed=embed, view=VerifyView())
-
-# ===================== STATUS COMMAND =====================
-
-@bot.tree.command(name="status", description="Show live bot status")
-@app_commands.guilds(discord.Object(id=GUILD_ID))
-async def status(interaction: discord.Interaction):
-    await send_or_edit_status("online")
-    await interaction.response.send_message("✅ Status displayed/updated.", ephemeral=True)
-
-# ===================== EVENTS =====================
-
-@bot.event
-async def on_ready():
-    await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-    await send_or_edit_status("online")
-    print(f"Bot online: {bot.user}")
-
-@bot.event
-async def on_disconnect():
-    await send_or_edit_status("offline")
-
-@bot.event
-async def on_resumed():
-    await send_or_edit_status("partial")
-
-@bot.event
-async def on_error(event, *args, **kwargs):
-    global LAST_ERROR_MESSAGE_ID
-    channel = bot.get_channel(BOT_STATUS_CHANNEL_ID)
-    if not channel:
-        return
-    if LAST_ERROR_MESSAGE_ID:
-        try:
-            old_msg = await channel.fetch_message(LAST_ERROR_MESSAGE_ID)
-            await old_msg.delete()
-        except (discord.NotFound, discord.Forbidden):
-            pass
-    error = shorten_error(traceback.format_exc())
-    embed = discord.Embed(
-        title="🔴 Bot Error",
-        color=discord.Color.red(),
-        timestamp=datetime.now(timezone.utc)
-    )
-    embed.add_field(name="📌 Event", value=f"`{event}`", inline=False)
-    embed.add_field(name="🧨 Error Details", value=f"```py\n{error}\n```", inline=False)
-    embed.set_footer(text="Latest error only • Previous errors removed")
-    msg = await channel.send(embed=embed)
-    LAST_ERROR_MESSAGE_ID = msg.id
-    print(error)
 
 # ===================== MEMBER EVENTS =====================
 
 @bot.event
 async def on_member_join(member):
-    rejoin_time = RECENT_LEAVES.get(member.id)
-    risk = "🟢 Low"
-    rejoin = "No"
-    if rejoin_time:
-        minutes = int((datetime.now(timezone.utc) - rejoin_time).total_seconds() / 60)
-        rejoin = f"Yes ({minutes} min)"
-        risk = "🔴 High" if minutes < 10 else "🟡 Medium"
     await send_log(
         JOIN_LOG_CHANNEL_ID,
         "🟢 Member Joined",
-        member,
-        discord.Color.green(),
-        [
-            ("📅 Account Age", account_age(member.created_at), False),
-            ("🕒 Account Created", f"<t:{int(member.created_at.timestamp())}:F>", False),
-            ("🔁 Rejoin", rejoin, False),
-            ("🧬 Risk Level", risk, False)
-        ]
+        f"{member} (`{member.id}`)",
+        discord.Color.green()
     )
 
 @bot.event
@@ -250,93 +169,156 @@ async def on_member_remove(member):
     await send_log(
         LEAVE_LOG_CHANNEL_ID,
         "🔴 Member Left",
-        member,
-        discord.Color.red(),
-        [
-            ("📅 Account Age", account_age(member.created_at), False),
-            ("🕒 Joined Server", f"<t:{int(member.joined_at.timestamp())}:F>" if member.joined_at else "Unknown", False)
-        ]
+        f"{member} (`{member.id}`)",
+        discord.Color.red()
     )
 
 @bot.event
-async def on_member_update(before: discord.Member, after: discord.Member):
-    # Nickname changes
+async def on_member_update(before, after):
     if before.nick != after.nick:
-        old = before.nick or before.name
-        new = after.nick or after.name
-        moderator = None
-        async for entry in after.guild.audit_logs(limit=5):
-            if entry.target and entry.target.id == after.id:
-                moderator = entry.user
-                break
-        changed_by = "Self" if not moderator or moderator.id == after.id else moderator.mention
         await send_log(
             SYSTEM_LOG_CHANNEL_ID,
             "✏️ Nickname Changed",
-            after,
-            discord.Color.blurple(),
-            [
-                ("🔤 Old Nickname", old, False),
-                ("🔠 New Nickname", new, False),
-                ("🛡️ Changed By", changed_by, False)
-            ]
-        )
-    # Role changes
-    before_roles = set(before.roles)
-    after_roles = set(after.roles)
-    added = after_roles - before_roles
-    removed = before_roles - after_roles
-    if added or removed:
-        moderator = None
-        async for entry in after.guild.audit_logs(limit=5):
-            if entry.target and entry.target.id == after.id:
-                moderator = entry.user
-                break
-    for role in added:
-        await send_log(
-            SYSTEM_LOG_CHANNEL_ID,
-            "➕ Role Added",
-            after,
-            discord.Color.green(),
-            [
-                ("🏷️ Role", role.mention, False),
-                ("🛡️ Added By", moderator.mention if moderator else "Unknown", False)
-            ]
-        )
-    for role in removed:
-        await send_log(
-            SYSTEM_LOG_CHANNEL_ID,
-            "➖ Role Removed",
-            after,
-            discord.Color.red(),
-            [
-                ("🏷️ Role", role.mention, False),
-                ("🛡️ Removed By", moderator.mention if moderator else "Unknown", False)
-            ]
+            f"**{before}** → **{after.nick or after.name}**",
+            discord.Color.orange()
         )
 
+# ===================== MESSAGE DELETE =====================
+
 @bot.event
-async def on_message_delete(message: discord.Message):
+async def on_message_delete(message):
     if message.author.bot:
         return
-    deleter = None
-    async for entry in message.guild.audit_logs(limit=5):
-        if entry.target and entry.target.id == message.author.id:
-            deleter = entry.user
-            break
-    content = message.content[:1000] if message.content else "*No text*"
     await send_log(
         SYSTEM_LOG_CHANNEL_ID,
         "🗑️ Message Deleted",
-        message.author,
-        discord.Color.orange(),
-        [
-            ("📍 Channel", message.channel.mention, False),
-            ("📝 Content", f"```{content}```", False),
-            ("🛡️ Deleted By", deleter.mention if deleter else "Unknown", False)
-        ]
+        f"**Author:** {message.author}\n**Content:** {message.content or 'Empty'}",
+        discord.Color.red()
+    )
+
+# ===================== ROLE UPDATE =====================
+
+@bot.event
+async def on_member_update(before, after):
+    if before.roles != after.roles:
+        removed = set(before.roles) - set(after.roles)
+        added = set(after.roles) - set(before.roles)
+
+        for r in added:
+            await send_log(
+                SYSTEM_LOG_CHANNEL_ID,
+                "➕ Role Added",
+                f"{after.mention} received {r.mention}",
+                discord.Color.green()
+            )
+
+        for r in removed:
+            await send_log(
+                SYSTEM_LOG_CHANNEL_ID,
+                "➖ Role Removed",
+                f"{after.mention} lost {r.mention}",
+                discord.Color.red()
+            )
+
+# ===================== MUSIC SYSTEM =====================
+
+YDL_OPTIONS = {"format": "bestaudio/best", "quiet": True, "noplaylist": True}
+
+async def play_next(guild_id):
+    guild = bot.get_guild(guild_id)
+    if not guild:
+        return
+
+    voice = guild.voice_client
+    queue = guild_queues.get(guild_id)
+
+    if not voice or not queue:
+        return
+
+    if len(queue) == 0:
+        await voice.disconnect()
+        return
+
+    song = queue.popleft()
+    source = await discord.FFmpegOpusAudio.from_probe(song["url"])
+    voice.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(guild_id), bot.loop))
+
+@bot.tree.command(name="play", description="Play music (Spotify link or search)")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+async def play(interaction: discord.Interaction, query: str):
+    if not interaction.user.voice:
+        await interaction.response.send_message("❌ Join a voice channel first.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    vc = interaction.guild.voice_client
+    if not vc:
+        vc = await interaction.user.voice.channel.connect()
+
+    with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+        info = ydl.extract_info(f"ytsearch:{query}", download=False)["entries"][0]
+
+    queue = guild_queues.setdefault(interaction.guild.id, deque())
+    queue.append({"title": info["title"], "url": info["url"]})
+
+    if not vc.is_playing():
+        await play_next(interaction.guild.id)
+        await interaction.followup.send(f"▶️ Now playing **{info['title']}**")
+    else:
+        await interaction.followup.send(f"➕ Added to queue **{info['title']}**")
+
+@bot.tree.command(name="skip", description="Skip current song")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+async def skip(interaction: discord.Interaction):
+    vc = interaction.guild.voice_client
+    if vc and vc.is_playing():
+        vc.stop()
+        await interaction.response.send_message("⏭️ Skipped.", ephemeral=True)
+
+@bot.tree.command(name="stop", description="Stop music and clear queue")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+async def stop(interaction: discord.Interaction):
+    vc = interaction.guild.voice_client
+    if vc:
+        await vc.disconnect()
+    guild_queues.get(interaction.guild.id, deque()).clear()
+    await interaction.response.send_message("⏹️ Stopped.", ephemeral=True)
+
+@bot.tree.command(name="queue", description="View queue")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+async def queue_cmd(interaction: discord.Interaction):
+    queue = guild_queues.get(interaction.guild.id)
+    if not queue:
+        await interaction.response.send_message("📭 Queue empty.", ephemeral=True)
+        return
+
+    text = "\n".join(f"{i+1}. {s['title']}" for i, s in enumerate(queue))
+    embed = discord.Embed(title="🎶 Queue", description=text, color=discord.Color.green())
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+# ===================== CORE EVENTS =====================
+
+@bot.event
+async def on_ready():
+    await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
+    await send_or_edit_status("online")
+    print(f"Logged in as {bot.user}")
+
+@bot.event
+async def on_disconnect():
+    await send_or_edit_status("offline")
+
+@bot.event
+async def on_error(event, *args, **kwargs):
+    err = traceback.format_exc(limit=4)
+    await send_log(
+        BOT_STATUS_CHANNEL_ID,
+        "⚠️ Bot Error",
+        f"```{err}```",
+        discord.Color.red()
     )
 
 # ===================== START =====================
 
-bot.run(os.getenv("TOKEN"))
+bot.run(TOKEN)
