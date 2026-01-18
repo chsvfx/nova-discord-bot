@@ -3,18 +3,16 @@ from discord.ext import commands
 from discord import app_commands
 from datetime import datetime, timezone
 import asyncio
+import yt_dlp
 from collections import deque
 import json
 import os
 import traceback
-import yt_dlp
 import imageio_ffmpeg
 
-# ===================== CONFIG =====================
 TOKEN = os.getenv("TOKEN")
 GUILD_ID = 1351310078849847358
 MEMBER_ROLE_ID = 1386784222781505619
-
 SYSTEM_LOG_CHANNEL_ID = 1462412675295481971
 VERIFY_LOG_CHANNEL_ID = 1462412645150752890
 JOIN_LOG_CHANNEL_ID = 1462412615195164908
@@ -23,18 +21,19 @@ BOT_STATUS_CHANNEL_ID = 1462406299936362516
 
 STATUS_FILE = "status_data.json"
 
-# ===================== INTENTS =====================
+# ======= INTENTS =======
 intents = discord.Intents.default()
 intents.members = True
 intents.voice_states = True
 intents.guilds = True
+intents.message_content = True  # needed if using message commands
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 BOT_START_TIME = datetime.now(timezone.utc)
 RECENT_LEAVES = {}
 guild_queues: dict[int, deque] = {}
 
-# ===================== JSON HELPERS =====================
+# ======= JSON HELPERS =======
 def load_status_data():
     if not os.path.exists(STATUS_FILE):
         return {"message_id": None}
@@ -45,7 +44,7 @@ def save_status_data(data):
     with open(STATUS_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
-# ===================== LOGGING =====================
+# ======= LOGGING =======
 async def send_log(channel_id, title, description, color):
     channel = bot.get_channel(channel_id)
     if not channel:
@@ -58,7 +57,7 @@ async def send_log(channel_id, title, description, color):
     )
     await channel.send(embed=embed)
 
-# ===================== STATUS SYSTEM =====================
+# ======= STATUS SYSTEM =======
 def build_status_embed(state: str):
     colors = {"online": discord.Color.green(), "offline": discord.Color.red(), "restart": discord.Color.orange()}
     texts = {"online": "🟢 Online", "offline": "🔴 Offline", "restart": "🟡 Restarting"}
@@ -97,7 +96,7 @@ async def send_or_edit_status(state: str):
 async def status_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(embed=build_status_embed("online"), ephemeral=True)
 
-# ===================== VERIFY SYSTEM =====================
+# ======= VERIFY SYSTEM =======
 class VerifyView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -106,7 +105,7 @@ class VerifyView(discord.ui.View):
     async def verify(self, interaction: discord.Interaction, _):
         role = interaction.guild.get_role(MEMBER_ROLE_ID)
         if role in interaction.user.roles:
-            await interaction.response.send_message("ℹ️ Already verified.", ephemeral=True)
+            await interaction.response.send_message("ℹ️ You are already verified.", ephemeral=True)
             return
         await interaction.user.add_roles(role, reason="Verification")
         await interaction.response.send_message("✅ You are now verified!", ephemeral=True)
@@ -127,34 +126,53 @@ async def verify(interaction: discord.Interaction):
     )
     await interaction.response.send_message(embed=embed, view=VerifyView())
 
-# ===================== MEMBER EVENTS =====================
+# ======= MEMBER EVENTS =======
 @bot.event
 async def on_member_join(member):
-    await send_log(JOIN_LOG_CHANNEL_ID, "🟢 Member Joined", f"{member} (`{member.id}`)", discord.Color.green())
+    await send_log(
+        JOIN_LOG_CHANNEL_ID,
+        "🟢 Member Joined",
+        f"{member} (`{member.id}`)",
+        discord.Color.green()
+    )
 
 @bot.event
 async def on_member_remove(member):
     RECENT_LEAVES[member.id] = datetime.now(timezone.utc)
-    await send_log(LEAVE_LOG_CHANNEL_ID, "🔴 Member Left", f"{member} (`{member.id}`)", discord.Color.red())
+    await send_log(
+        LEAVE_LOG_CHANNEL_ID,
+        "🔴 Member Left",
+        f"{member} (`{member.id}`)",
+        discord.Color.red()
+    )
 
-# ===================== MUSIC SYSTEM =====================
-YDL_OPTIONS = {"format": "bestaudio/best", "quiet": True, "noplaylist": True}
+# ======= MUSIC SYSTEM =======
+YDL_OPTIONS = {
+    "format": "bestaudio[ext=webm]/bestaudio/best",
+    "quiet": True,
+    "noplaylist": True
+}
+
 FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
 
 async def play_next(guild_id):
     guild = bot.get_guild(guild_id)
     if not guild:
         return
-    vc = guild.voice_client
+    voice = guild.voice_client
     queue = guild_queues.get(guild_id)
-    if not vc or not queue:
+    if not voice or not queue:
         return
     if len(queue) == 0:
-        await vc.disconnect()
+        await voice.disconnect()
         return
     song = queue.popleft()
-    source = await discord.FFmpegOpusAudio.from_probe(song["url"], executable=FFMPEG_PATH)
-    vc.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(guild_id), bot.loop))
+    source = discord.FFmpegPCMAudio(
+        song["url"],
+        executable=FFMPEG_PATH,
+        options="-vn"
+    )
+    voice.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(guild_id), bot.loop))
 
 @bot.tree.command(name="play", description="Play music from YouTube")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
@@ -204,18 +222,18 @@ async def stop(interaction: discord.Interaction):
     guild_queues.get(interaction.guild.id, deque()).clear()
     await interaction.response.send_message("⏹️ Stopped.", ephemeral=True)
 
-@bot.tree.command(name="queue", description="View music queue")
+@bot.tree.command(name="queue", description="View queue")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 async def queue_cmd(interaction: discord.Interaction):
     queue = guild_queues.get(interaction.guild.id)
-    if not queue or len(queue) == 0:
+    if not queue:
         await interaction.response.send_message("📭 Queue empty.", ephemeral=True)
         return
     text = "\n".join(f"{i+1}. {s['title']}" for i, s in enumerate(queue))
     embed = discord.Embed(title="🎶 Queue", description=text, color=discord.Color.green())
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# ===================== CORE EVENTS =====================
+# ======= EVENTS =======
 @bot.event
 async def on_ready():
     guild = discord.Object(id=GUILD_ID)
@@ -230,7 +248,12 @@ async def on_disconnect():
 @bot.event
 async def on_error(event, *args, **kwargs):
     err = traceback.format_exc(limit=4)
-    await send_log(BOT_STATUS_CHANNEL_ID, "⚠️ Bot Error", f"```{err}```", discord.Color.red())
+    await send_log(
+        BOT_STATUS_CHANNEL_ID,
+        "⚠️ Bot Error",
+        f"```{err}```",
+        discord.Color.red()
+    )
 
-# ===================== START =====================
+# ======= RUN =======
 bot.run(TOKEN)
