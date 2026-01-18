@@ -139,7 +139,7 @@ async def on_member_remove(member):
 
 # ===================== MUSIC SYSTEM =====================
 YDL_OPTIONS = {"format": "bestaudio/best", "quiet": True, "noplaylist": True}
-FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()  # Static ffmpeg for Railway
+FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
 
 async def play_next(guild_id):
     guild = bot.get_guild(guild_id)
@@ -203,6 +203,17 @@ async def stop(interaction: discord.Interaction):
         await vc.disconnect()
     guild_queues.get(interaction.guild.id, deque()).clear()
     await interaction.response.send_message("⏹️ Stopped.", ephemeral=True)
+
+@bot.tree.command(name="queue", description="View music queue")
+@app_commands.guilds(discord.Object(id=GUILD_ID))
+async def queue_cmd(interaction: discord.Interaction):
+    queue = guild_queues.get(interaction.guild.id)
+    if not queue or len(queue) == 0:
+        await interaction.response.send_message("📭 Queue empty.", ephemeral=True)
+        return
+    text = "\n".join(f"{i+1}. {s['title']}" for i, s in enumerate(queue))
+    embed = discord.Embed(title="🎶 Queue", description=text, color=discord.Color.green())
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ===================== CORE EVENTS =====================
 @bot.event
