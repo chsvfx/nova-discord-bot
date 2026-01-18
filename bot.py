@@ -10,9 +10,11 @@ import os
 import traceback
 import imageio_ffmpeg
 
+# ===================== CONFIG =====================
 TOKEN = os.getenv("TOKEN")
 GUILD_ID = 1351310078849847358
 MEMBER_ROLE_ID = 1386784222781505619
+
 SYSTEM_LOG_CHANNEL_ID = 1462412675295481971
 VERIFY_LOG_CHANNEL_ID = 1462412645150752890
 JOIN_LOG_CHANNEL_ID = 1462412615195164908
@@ -21,19 +23,20 @@ BOT_STATUS_CHANNEL_ID = 1462406299936362516
 
 STATUS_FILE = "status_data.json"
 
-# ======= INTENTS =======
+# ===================== INTENTS =====================
 intents = discord.Intents.default()
 intents.members = True
 intents.voice_states = True
 intents.guilds = True
-intents.message_content = True  # needed if using message commands
+intents.message_content = True  # optional if you use message commands
 
 bot = commands.Bot(command_prefix="!", intents=intents)
+
 BOT_START_TIME = datetime.now(timezone.utc)
 RECENT_LEAVES = {}
 guild_queues: dict[int, deque] = {}
 
-# ======= JSON HELPERS =======
+# ===================== JSON HELPERS =====================
 def load_status_data():
     if not os.path.exists(STATUS_FILE):
         return {"message_id": None}
@@ -44,7 +47,7 @@ def save_status_data(data):
     with open(STATUS_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
-# ======= LOGGING =======
+# ===================== LOGGING =====================
 async def send_log(channel_id, title, description, color):
     channel = bot.get_channel(channel_id)
     if not channel:
@@ -57,7 +60,7 @@ async def send_log(channel_id, title, description, color):
     )
     await channel.send(embed=embed)
 
-# ======= STATUS SYSTEM =======
+# ===================== STATUS SYSTEM =====================
 def build_status_embed(state: str):
     colors = {"online": discord.Color.green(), "offline": discord.Color.red(), "restart": discord.Color.orange()}
     texts = {"online": "🟢 Online", "offline": "🔴 Offline", "restart": "🟡 Restarting"}
@@ -96,7 +99,7 @@ async def send_or_edit_status(state: str):
 async def status_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(embed=build_status_embed("online"), ephemeral=True)
 
-# ======= VERIFY SYSTEM =======
+# ===================== VERIFY SYSTEM =====================
 class VerifyView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -126,7 +129,7 @@ async def verify(interaction: discord.Interaction):
     )
     await interaction.response.send_message(embed=embed, view=VerifyView())
 
-# ======= MEMBER EVENTS =======
+# ===================== MEMBER EVENTS =====================
 @bot.event
 async def on_member_join(member):
     await send_log(
@@ -146,14 +149,51 @@ async def on_member_remove(member):
         discord.Color.red()
     )
 
-# ======= MUSIC SYSTEM =======
+@bot.event
+async def on_member_update(before, after):
+    if before.nick != after.nick:
+        await send_log(
+            SYSTEM_LOG_CHANNEL_ID,
+            "✏️ Nickname Changed",
+            f"**{before}** → **{after.nick or after.name}**",
+            discord.Color.orange()
+        )
+    if before.roles != after.roles:
+        removed = set(before.roles) - set(after.roles)
+        added = set(after.roles) - set(before.roles)
+        for r in added:
+            await send_log(
+                SYSTEM_LOG_CHANNEL_ID,
+                "➕ Role Added",
+                f"{after.mention} received {r.mention}",
+                discord.Color.green()
+            )
+        for r in removed:
+            await send_log(
+                SYSTEM_LOG_CHANNEL_ID,
+                "➖ Role Removed",
+                f"{after.mention} lost {r.mention}",
+                discord.Color.red()
+            )
+
+@bot.event
+async def on_message_delete(message):
+    if message.author.bot:
+        return
+    await send_log(
+        SYSTEM_LOG_CHANNEL_ID,
+        "🗑️ Message Deleted",
+        f"**Author:** {message.author}\n**Content:** {message.content or 'Empty'}",
+        discord.Color.red()
+    )
+
+# ===================== MUSIC SYSTEM =====================
+FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
 YDL_OPTIONS = {
     "format": "bestaudio[ext=webm]/bestaudio/best",
     "quiet": True,
     "noplaylist": True
 }
-
-FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
 
 async def play_next(guild_id):
     guild = bot.get_guild(guild_id)
@@ -167,11 +207,7 @@ async def play_next(guild_id):
         await voice.disconnect()
         return
     song = queue.popleft()
-    source = discord.FFmpegPCMAudio(
-        song["url"],
-        executable=FFMPEG_PATH,
-        options="-vn"
-    )
+    source = discord.FFmpegPCMAudio(song["url"], executable=FFMPEG_PATH, options="-vn")
     voice.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(guild_id), bot.loop))
 
 @bot.tree.command(name="play", description="Play music from YouTube")
@@ -233,7 +269,7 @@ async def queue_cmd(interaction: discord.Interaction):
     embed = discord.Embed(title="🎶 Queue", description=text, color=discord.Color.green())
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# ======= EVENTS =======
+# ===================== CORE EVENTS =====================
 @bot.event
 async def on_ready():
     guild = discord.Object(id=GUILD_ID)
@@ -255,5 +291,5 @@ async def on_error(event, *args, **kwargs):
         discord.Color.red()
     )
 
-# ======= RUN =======
+# ===================== START =====================
 bot.run(TOKEN)

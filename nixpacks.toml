@@ -1,2 +1,13 @@
-[project]
-name = "nova-discord-bot"
+[phases.setup]
+# No extra setup needed, imageio-ffmpeg handles FFmpeg
+
+[phases.install]
+# Install Python packages
+commands = ["pip install -r requirements.txt"]
+
+[phases.build]
+commands = []
+
+[phases.start]
+# Start the bot
+commands = ["python bot.py"]
