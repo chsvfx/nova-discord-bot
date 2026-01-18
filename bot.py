@@ -8,6 +8,8 @@ from collections import deque
 import json
 import os
 import traceback
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
 
 # ===================== CONFIG =====================
 
@@ -18,10 +20,13 @@ SYSTEM_LOG_CHANNEL_ID = 1462412675295481971
 VERIFY_LOG_CHANNEL_ID = 1462412645150752890
 JOIN_LOG_CHANNEL_ID = 1462412615195164908
 LEAVE_LOG_CHANNEL_ID = 1462412568747573422
-BOT_STATUS_CHANNEL_ID = 1462406299936362516 # Status + Errors
+BOT_STATUS_CHANNEL_ID = 1462406299936362516  # Status + Errors
 
 STATUS_FILE = "status_data.json"
 TOKEN = os.getenv("TOKEN")
+
+SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
 
 # ===================== INTENTS =====================
 
@@ -36,6 +41,12 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 BOT_START_TIME = datetime.now(timezone.utc)
 RECENT_LEAVES = {}
 guild_queues: dict[int, deque] = {}
+
+# Spotify client
+spotify = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
+    client_id=SPOTIFY_CLIENT_ID,
+    client_secret=SPOTIFY_CLIENT_SECRET
+))
 
 # ===================== JSON HELPERS =====================
 
@@ -157,7 +168,6 @@ async def on_member_remove(member):
 
 @bot.event
 async def on_member_update(before, after):
-    # Nickname change
     if before.nick != after.nick:
         await send_log(
             SYSTEM_LOG_CHANNEL_ID,
@@ -165,7 +175,6 @@ async def on_member_update(before, after):
             f"**{before}** → **{after.nick or after.name}**",
             discord.Color.orange()
         )
-    # Role changes
     if before.roles != after.roles:
         removed = set(before.roles) - set(after.roles)
         added = set(after.roles) - set(before.roles)
@@ -216,25 +225,61 @@ async def play_next(guild_id):
     source = await discord.FFmpegOpusAudio.from_probe(song["url"])
     voice.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(guild_id), bot.loop))
 
-@bot.tree.command(name="play", description="Play music (Spotify link or search)")
+async def add_spotify_to_queue(query: str, guild_id: int):
+    if "track" in query:
+        track = spotify.track(query)
+        name = track["name"]
+        url = track["external_urls"]["spotify"]
+        return [{"title": name, "url": url}]
+    if "playlist" in query:
+        playlist = spotify.playlist_items(query)
+        songs = []
+        for item in playlist["items"]:
+            t = item["track"]
+            songs.append({"title": t["name"], "url": t["external_urls"]["spotify"]})
+        return songs
+    return []
+
+@bot.tree.command(name="play", description="Play music (YouTube search or Spotify link)")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
 async def play(interaction: discord.Interaction, query: str):
     if not interaction.user.voice:
         await interaction.response.send_message("❌ Join a voice channel first.", ephemeral=True)
         return
+
     await interaction.response.defer(ephemeral=True)
     vc = interaction.guild.voice_client
     if not vc:
         vc = await interaction.user.voice.channel.connect()
-    with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-        info = ydl.extract_info(f"ytsearch:{query}", download=False)["entries"][0]
+
     queue = guild_queues.setdefault(interaction.guild.id, deque())
-    queue.append({"title": info["title"], "url": info["url"]})
-    if not vc.is_playing():
-        await play_next(interaction.guild.id)
-        await interaction.followup.send(f"▶️ Now playing **{info['title']}**")
-    else:
-        await interaction.followup.send(f"➕ Added to queue **{info['title']}**")
+
+    try:
+        # Spotify link
+        if "spotify.com" in query:
+            songs = await add_spotify_to_queue(query, interaction.guild.id)
+            if not songs:
+                await interaction.followup.send("❌ No songs found in Spotify link.", ephemeral=True)
+                return
+            for s in songs:
+                queue.append(s)
+            if not vc.is_playing():
+                await play_next(interaction.guild.id)
+            await interaction.followup.send(f"🎵 Added {len(songs)} song(s) from Spotify to queue!")
+        else:
+            # YouTube search
+            with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+                search = ydl.extract_info(f"ytsearch:{query}", download=False)
+                if "entries" not in search or len(search["entries"]) == 0:
+                    await interaction.followup.send("❌ No results found.", ephemeral=True)
+                    return
+                info = search["entries"][0]
+                queue.append({"title": info["title"], "url": info["url"]})
+                if not vc.is_playing():
+                    await play_next(interaction.guild.id)
+                await interaction.followup.send(f"▶️ Now playing **{info['title']}**")
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 @bot.tree.command(name="skip", description="Skip current song")
 @app_commands.guilds(discord.Object(id=GUILD_ID))
